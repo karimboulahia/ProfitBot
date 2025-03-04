@@ -35,13 +35,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # --- Karim Mode ---
 async def karim_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    context.user_data["karim_mode"] = True  # Mark Karim Mode as active
+    context.user_data["karim_mode"] = True
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("💰 Send me an amount, and I'll calculate your Fiverr net profit.")
 
 async def calculate_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.user_data.get("adding_order") or context.user_data.get("deleting_order") or context.user_data.get("filtering_orders"):
-        return  # Ignore if user is performing an order-related action
+    if "adding_order" in context.user_data and context.user_data["adding_order"]:
+        return  # Ignore if adding an order
 
     try:
         total_amount = float(update.message.text.strip())
@@ -63,7 +63,7 @@ async def manage_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("📑 Manage your orders:", reply_markup=reply_markup)
 
-# --- Add New Order ---
+# --- Add Order ---
 async def add_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["adding_order"] = True
     await update.callback_query.answer()
@@ -82,12 +82,13 @@ async def get_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Enter the **Deadline (YYYY-MM-DD)**:")
         return DEADLINE
     except ValueError:
-        await update.message.reply_text("⚠️ Please enter a valid number for the budget (e.g., 50).")
+        await update.message.reply_text("⚠️ Please enter a valid budget (e.g., 50).")
         return BUDGET
 
 async def get_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.message.chat_id
     context.user_data["deadline"] = update.message.text
+
     cursor.execute("INSERT INTO orders (user_id, client_name, budget, deadline) VALUES (?, ?, ?, ?)",
                    (user_id, context.user_data["client_name"], context.user_data["budget"], context.user_data["deadline"]))
     conn.commit()
@@ -96,7 +97,7 @@ async def get_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text("✅ Order Added Successfully!")
     return ConversationHandler.END
 
-# --- View Only the User's Orders ---
+# --- View Orders ---
 async def view_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.callback_query.message.chat_id
     cursor.execute("SELECT id, client_name, budget, deadline, status FROM orders WHERE user_id = ?", (user_id,))
@@ -108,34 +109,6 @@ async def view_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     order_text = "\n".join([f"🆔 {o[0]} | {o[1]} | ${o[2]:.2f} | Deadline: {o[3]} | Status: {o[4]}" for o in orders])
     await update.callback_query.message.reply_text(f"📋 Your Orders:\n\n{order_text}")
-
-# --- Filter Orders by Status ---
-async def filter_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    keyboard = [
-        [InlineKeyboardButton("🟢 Active", callback_data="status_Active")],
-        [InlineKeyboardButton("🟡 In Progress", callback_data="status_In Progress")],
-        [InlineKeyboardButton("🔴 Completed", callback_data="status_Completed")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    context.user_data["filtering_orders"] = True
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text("Select a status to filter:", reply_markup=reply_markup)
-    return FILTER_STATUS
-
-async def filter_orders_by_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.callback_query.message.chat_id
-    status = update.callback_query.data.split("_")[1]
-    cursor.execute("SELECT id, client_name, budget, deadline FROM orders WHERE user_id = ? AND status = ?", (user_id, status))
-    orders = cursor.fetchall()
-
-    context.user_data["filtering_orders"] = False
-
-    if not orders:
-        await update.callback_query.message.reply_text(f"No orders found with status: {status}.")
-        return
-
-    order_text = "\n".join([f"🆔 {o[0]} | {o[1]} | ${o[2]:.2f} | Deadline: {o[3]}" for o in orders])
-    await update.callback_query.message.reply_text(f"📋 Your Orders with status '{status}':\n\n{order_text}")
 
 # --- Delete Order ---
 async def delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -160,12 +133,24 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    
+    order_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(add_order, pattern="add_order")],
+        states={
+            CLIENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_client_name)],
+            BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_budget)],
+            DEADLINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_deadline)],
+            ORDER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_delete_order)]
+        },
+        fallbacks=[]
+    )
+    app.add_handler(order_handler)
+
     app.add_handler(CallbackQueryHandler(karim_mode, pattern="karim_mode"))
     app.add_handler(CallbackQueryHandler(manage_orders, pattern="manage_orders"))
     app.add_handler(CallbackQueryHandler(view_orders, pattern="view_orders"))
-    app.add_handler(CallbackQueryHandler(filter_orders, pattern="filter_orders"))
-    app.add_handler(CallbackQueryHandler(filter_orders_by_status, pattern="status_"))
     app.add_handler(CallbackQueryHandler(delete_order, pattern="delete_order"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
 
     print("Bot is running...")
     app.run_polling()
