@@ -1,13 +1,12 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-
 import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Get bot token from Railway environment variables
 TOKEN = os.getenv("TOKEN")
 
 # Initialize the application
-app = Application.builder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).build()
 
 async def start(update: Update, context: CallbackContext) -> None:
     """Send a welcome message when the bot starts."""
@@ -34,11 +33,9 @@ async def calculate_profit(update: Update, context: CallbackContext) -> None:
 
 def main():
     """Start the bot."""
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
 
-    # Run the bot
     print("Bot is running...")
     app.run_polling()
 
