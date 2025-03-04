@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS orders (
 conn.commit()
 
 # Define conversation states
-CLIENT_NAME, BUDGET, DEADLINE, ORDER_ID, FILTER_STATUS = range(5)
+CLIENT_NAME, BUDGET, DEADLINE, ORDER_ID = range(4)
 
 # --- Start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -40,8 +40,9 @@ async def karim_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.callback_query.message.reply_text("💰 Send me an amount, and I'll calculate your Fiverr net profit.")
 
 async def calculate_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if "adding_order" in context.user_data and context.user_data["adding_order"]:
-        return  # Ignore if adding an order
+    # If the user is performing another action, do not process Karim Mode
+    if any(context.user_data.get(key) for key in ["adding_order", "deleting_order"]):
+        return  
 
     try:
         total_amount = float(update.message.text.strip())
@@ -56,7 +57,6 @@ async def manage_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = [
         [InlineKeyboardButton("➕ Add Order", callback_data="add_order")],
         [InlineKeyboardButton("📋 View My Orders", callback_data="view_orders")],
-        [InlineKeyboardButton("🔄 Filter Orders by Status", callback_data="filter_orders")],
         [InlineKeyboardButton("❌ Delete My Order", callback_data="delete_order")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -119,13 +119,20 @@ async def delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def confirm_delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.message.chat_id
-    order_id = update.message.text
+    order_id = update.message.text.strip()
 
-    cursor.execute("DELETE FROM orders WHERE id = ? AND user_id = ?", (order_id, user_id))
-    conn.commit()
+    # Check if order exists and belongs to the user
+    cursor.execute("SELECT id FROM orders WHERE id = ? AND user_id = ?", (order_id, user_id))
+    order = cursor.fetchone()
 
-    context.user_data["deleting_order"] = False
-    await update.message.reply_text(f"✅ Order {order_id} deleted successfully!")
+    if order:
+        cursor.execute("DELETE FROM orders WHERE id = ? AND user_id = ?", (order_id, user_id))
+        conn.commit()
+        context.user_data["deleting_order"] = False
+        await update.message.reply_text(f"✅ Order {order_id} deleted successfully!")
+    else:
+        await update.message.reply_text(f"❌ Order {order_id} not found or does not belong to you.")
+
     return ConversationHandler.END
 
 # --- Main Bot Setup ---
@@ -150,6 +157,7 @@ def main():
     app.add_handler(CallbackQueryHandler(manage_orders, pattern="manage_orders"))
     app.add_handler(CallbackQueryHandler(view_orders, pattern="view_orders"))
     app.add_handler(CallbackQueryHandler(delete_order, pattern="delete_order"))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
 
     print("Bot is running...")
