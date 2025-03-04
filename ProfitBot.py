@@ -1,18 +1,22 @@
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
+import os
 
-# Replace this with your Telegram Bot Token
-TOKEN = "8070911062:AAGRIeT4hZbc8MMqZyTyuk7DfuNo--KAVSY"
+# Get bot token from Railway environment variables
+TOKEN = os.getenv("TOKEN")
 
-def start(update: Update, context: CallbackContext) -> None:
-    """Send a welcome message and explain how to use the bot."""
-    update.message.reply_text(
+# Initialize the application
+app = Application.builder().token(TOKEN).build()
+
+async def start(update: Update, context: CallbackContext) -> None:
+    """Send a welcome message when the bot starts."""
+    await update.message.reply_text(
         "Hello! Send me an amount, and I'll calculate your Fiverr net profit after fees.\n\n"
         "Example: If you send '100', I'll tell you how much you keep after Fiverr's fees."
     )
 
-def calculate_profit(update: Update, context: CallbackContext) -> None:
+async def calculate_profit(update: Update, context: CallbackContext) -> None:
     """Calculate net profit after Fiverr fees."""
     try:
         user_input = update.message.text.strip()
@@ -22,27 +26,21 @@ def calculate_profit(update: Update, context: CallbackContext) -> None:
         amount_after_20 = total_amount * 0.80  # Deduct 20%
         final_profit = amount_after_20 * 0.60  # Deduct 40% from the remaining
 
-        update.message.reply_text(
+        await update.message.reply_text(
             f"For ${total_amount}, your net profit after Fiverr fees is: **${final_profit:.2f}**"
         )
     except ValueError:
-        update.message.reply_text("Please send a valid number (e.g., 10, 25.50).")
+        await update.message.reply_text("Please send a valid number (e.g., 100, 250.50).")
 
 def main():
     """Start the bot."""
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    # Add handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
 
-    # Commands
-    dp.add_handler(CommandHandler("start", start))
-
-    # Messages (for numbers input)
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, calculate_profit))
-
-    # Start the bot
-    updater.start_polling()
-    updater.idle()
+    # Run the bot
+    print("Bot is running...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
-
