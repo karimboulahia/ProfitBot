@@ -1,5 +1,6 @@
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+
 
 # Replace this with your Telegram Bot Token
 TOKEN = "8070911062:AAGRIeT4hZbc8MMqZyTyuk7DfuNo--KAVSY"
