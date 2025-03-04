@@ -1,1 +1,1 @@
-
+worker: python ProfitBot.py
