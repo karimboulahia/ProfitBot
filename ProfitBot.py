@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS orders (
 conn.commit()
 
 # Define conversation states
-CLIENT_NAME, BUDGET, DEADLINE, ORDER_ID, FILTER_STATUS = range(5)
+CLIENT_NAME, BUDGET, DEADLINE, ORDER_ID = range(4)
 
 # --- Start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -40,6 +40,9 @@ async def karim_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.callback_query.message.reply_text("💰 Karim Mode activated! Send me an amount, and I'll calculate your Fiverr net profit.")
 
 async def calculate_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if "adding_order" in context.user_data and context.user_data["adding_order"]:
+        return  # Ignore if user is adding an order
+
     try:
         user_input = update.message.text.strip()
         total_amount = float(user_input)
@@ -54,8 +57,6 @@ async def manage_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = [
         [InlineKeyboardButton("➕ Add Order", callback_data="add_order")],
         [InlineKeyboardButton("📋 View My Orders", callback_data="view_orders")],
-        [InlineKeyboardButton("🔄 Filter My Orders by Status", callback_data="filter_status")],
-        [InlineKeyboardButton("✏️ Change My Order Status", callback_data="change_status")],
         [InlineKeyboardButton("❌ Delete My Order", callback_data="delete_order")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -64,13 +65,14 @@ async def manage_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # --- Add New Order (Linked to User) ---
 async def add_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["adding_order"] = True  # Prevents Karim Mode interference
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("Enter the **Client Name**:")
     return CLIENT_NAME
 
 async def get_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["client_name"] = update.message.text
-    await update.message.reply_text("Enter the **Budget ($)**:")
+    await update.message.reply_text("Enter the **Budget ($)** (e.g., 50):")
     return BUDGET
 
 async def get_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -80,15 +82,18 @@ async def get_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Enter the **Deadline (YYYY-MM-DD)**:")
         return DEADLINE
     except ValueError:
-        await update.message.reply_text("Please enter a valid number for the budget:")
+        await update.message.reply_text("⚠️ Please enter a valid budget as a number (e.g., 50).")
         return BUDGET
 
 async def get_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.message.chat_id
     context.user_data["deadline"] = update.message.text
+
     cursor.execute("INSERT INTO orders (user_id, client_name, budget, deadline) VALUES (?, ?, ?, ?)",
                    (user_id, context.user_data["client_name"], context.user_data["budget"], context.user_data["deadline"]))
     conn.commit()
+
+    context.user_data["adding_order"] = False  # Allow Karim Mode again
     await update.message.reply_text("✅ Order Added Successfully!")
     return ConversationHandler.END
 
@@ -126,13 +131,8 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
-
-    app.add_handler(CallbackQueryHandler(karim_mode, pattern="karim_mode"))
-    app.add_handler(CallbackQueryHandler(manage_orders, pattern="manage_orders"))
-    app.add_handler(CallbackQueryHandler(view_orders, pattern="view_orders"))
-    app.add_handler(CallbackQueryHandler(delete_order, pattern="delete_order"))
-
+    
+    # Separate conversation handler for orders
     order_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_order, pattern="add_order")],
         states={
@@ -144,6 +144,15 @@ def main():
         fallbacks=[]
     )
     app.add_handler(order_handler)
+
+    # Normal handlers for buttons
+    app.add_handler(CallbackQueryHandler(karim_mode, pattern="karim_mode"))
+    app.add_handler(CallbackQueryHandler(manage_orders, pattern="manage_orders"))
+    app.add_handler(CallbackQueryHandler(view_orders, pattern="view_orders"))
+    app.add_handler(CallbackQueryHandler(delete_order, pattern="delete_order"))
+
+    # Karim Mode Profit Calculation (only when no order is being added)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, calculate_profit))
 
     print("Bot is running...")
     app.run_polling()
